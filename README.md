@@ -20,7 +20,12 @@ of vectors.
 #### Installation
 
 ```shell script
+git clone git@github.com:k2-fsa/multi_quantization.git
 python3 setup.py install
+
+or
+
+pip install multi_quantization
 ```
 
 
@@ -28,10 +33,12 @@ python3 setup.py install
 
 ```python
 import torch
-import quantization
+import multi_quantization
 
-trainer = quantization.QuantizerTrainer(dim=256, bytes_per_frame=4,
-                                        device=torch.device('cuda'))
+trainer = multi_quantization.QuantizerTrainer(
+    dim=256, bytes_per_frame=4, device=torch.device("cuda")
+)
+
 while not trainer.done():
    # let x be some tensor of shape (*, dim), that you will train on
    # (should not be the same on each minibatch)

@@ -1,6 +1,6 @@
 import logging
 import math
-from quantization import Quantizer, QuantizerTrainer
+from multi_quantization import Quantizer, QuantizerTrainer
 import random
 import torch
 from torch import nn
