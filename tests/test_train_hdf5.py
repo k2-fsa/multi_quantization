@@ -4,8 +4,8 @@ import numpy as np
 import torch
 from torch import nn
 from torch import Tensor
-from quantization import read_hdf5_data, Quantizer, QuantizerTrainer
-from prediction import JointCodebookLoss
+from multi_quantization import read_hdf5_data, Quantizer, QuantizerTrainer
+from multi_quantization import JointCodebookLoss
 
 def _test_train_from_file():
     train, valid = read_hdf5_data('training_data.hdf5')
