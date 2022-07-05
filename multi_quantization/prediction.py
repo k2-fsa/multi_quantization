@@ -15,6 +15,7 @@ def joint_codebook_loss(predictor: Tensor,
                         linear2b_weight: Tensor,
                         linear2_bias: Tensor,
                         ignore_index: int,
+                        is_joint: bool,
                         reduction: str) -> Tensor:
     """
     Args:
@@ -30,6 +31,7 @@ def joint_codebook_loss(predictor: Tensor,
                                                 predictor_dim)
        linear2_bias: bias of shape (num_codebooks, codebook_size)
        ignore_index: index to ignore in cross entropy loss, e.g. -100
+       is_joint: if false, this function becomes a standard CE loss.
        reduction: reduction in cross entropy loss, e.g. 'sum'
     """
     num_codebooks = codebook_indexes.shape[-1]
@@ -41,40 +43,42 @@ def joint_codebook_loss(predictor: Tensor,
     assert list(predictor.shape[:-1]) == list(codebook_indexes.shape[:-1])
     predictor = predictor.reshape(-1, predictor.shape[-1])  # (N, predictor_channels)
     codebook_indexes = codebook_indexes.reshape(-1, codebook_indexes.shape[-1])
-    first_indexes = codebook_indexes[:,:-1] # all but last codebook indexes; (N, num_codebooks-1)
 
-    # do clamp(min=0) to avoid errors on padding (-100).. these frames will
-    # later be ignored in the loss, so the value can be treated as a don't-care.
-    first_indexes = first_indexes.clamp(min=0) + torch.arange(0, (num_codebooks - 1) * codebook_size,
-                                                              step=codebook_size,
-                                                              device=first_indexes.device)  # (N, num_codebooks-1)
-
-    first_embeddings_scale = 0.5 * ((hidden_channels / num_codebooks) ** 0.5)
-    first_embeddings = torch.nn.functional.embedding(first_indexes,
-                                                     codebook_embedding_weight) * first_embeddings_scale # (N, num_codebooks-1, hidden_channels)
-
-
-    hidden_predictor = torch.nn.functional.linear(predictor, linear1_weight, linear1_bias)
-    all_embeddings = torch.cat((hidden_predictor.unsqueeze(1),
-                                first_embeddings),
-                               dim=1) # (N, num_codebooks, hidden_channels)
-
-    # after cumsum, all positions will contain a contribution from 'hidden_predictor'; and
-    # will also contain contributions from all *previous* codebooks.  Here, "position" means
-    # a position in {0..num_codebooks-1}
-    all_embeddings = torch.cumsum(all_embeddings, dim=1) # (N, num_codebooks, hidden_channels)
-
-    all_embeddings = torch.nn.functional.relu(all_embeddings)
-
-    logprobs = torch.matmul(all_embeddings.transpose(0, 1), # (num_codebooks, N, hidden_channels)
-                            linear2_weight.transpose(1, 2)   #  (num_codebooks, hidden_channels, codebook_size)
-                            ).transpose(0, 1)  # (N, num_codebooks, codebook_size)
-
-    logprobs += torch.matmul(predictor, # (N, predictor_channels)
+    logprobs = torch.matmul(predictor, # (N, predictor_channels)
                              linear2b_weight.transpose(1, 2) # (num_codebooks, predictor_channels, codebook_size)
                              ).transpose(0, 1) # (N, num_codebooks, codebook_size)
 
     logprobs += linear2_bias
+    if is_joint:
+        first_indexes = codebook_indexes[:,:-1] # all but last codebook indexes; (N, num_codebooks-1)
+
+        # do clamp(min=0) to avoid errors on padding (-100).. these frames will
+        # later be ignored in the loss, so the value can be treated as a don't-care.
+        first_indexes = first_indexes.clamp(min=0) + torch.arange(0, (num_codebooks - 1) * codebook_size,
+                                                                  step=codebook_size,
+                                                                  device=first_indexes.device)  # (N, num_codebooks-1)
+
+        first_embeddings_scale = 0.5 * ((hidden_channels / num_codebooks) ** 0.5)
+        first_embeddings = torch.nn.functional.embedding(first_indexes,
+                                                         codebook_embedding_weight) * first_embeddings_scale # (N, num_codebooks-1, hidden_channels)
+
+
+        hidden_predictor = torch.nn.functional.linear(predictor, linear1_weight, linear1_bias)
+        all_embeddings = torch.cat((hidden_predictor.unsqueeze(1),
+                                    first_embeddings),
+                                   dim=1) # (N, num_codebooks, hidden_channels)
+
+        # after cumsum, all positions will contain a contribution from 'hidden_predictor'; and
+        # will also contain contributions from all *previous* codebooks.  Here, "position" means
+        # a position in {0..num_codebooks-1}
+        all_embeddings = torch.cumsum(all_embeddings, dim=1) # (N, num_codebooks, hidden_channels)
+
+        all_embeddings = torch.nn.functional.relu(all_embeddings)
+
+        logprobs += torch.matmul(all_embeddings.transpose(0, 1), # (num_codebooks, N, hidden_channels)
+                                linear2_weight.transpose(1, 2)   #  (num_codebooks, hidden_channels, codebook_size)
+                                ).transpose(0, 1)  # (N, num_codebooks, codebook_size)
+
 
     return torch.nn.functional.cross_entropy(logprobs.reshape(-1, codebook_size),
                                              codebook_indexes.reshape(-1),
@@ -114,6 +118,7 @@ class JointCodebookLoss(nn.Module):
               codebooks by earlier-numbered codebooks
         hidden_dim: the hidden dimension per codebook (we use a 1-hidden-layer
               network, with a ReLU and then batchnorm).
+        is_joint: if false, becomes a standard CE loss.
         checkpoint: if true, reduce backprop memory at the expense of doing
               the computation twice.
     """
@@ -124,6 +129,7 @@ class JointCodebookLoss(nn.Module):
                  codebook_size: int = 256,
                  reduction: str = 'sum',
                  ignore_index: int = -100,
+                 is_joint: bool = True,
                  checkpoint: bool = True):
         super(JointCodebookLoss, self).__init__()
 
@@ -133,6 +139,7 @@ class JointCodebookLoss(nn.Module):
         self.hidden_channels = hidden_channels
         self.ignore_index = ignore_index
         self.reduction = reduction
+        self.is_joint = is_joint
         self.checkpoint = checkpoint
 
         self.linear1 = nn.Linear(predictor_channels, hidden_channels)
@@ -182,6 +189,7 @@ class JointCodebookLoss(nn.Module):
                 self.linear2b_weight,
                 self.linear2_bias,
                 self.ignore_index,
+                self.is_joint,
                 self.reduction)
         if self.checkpoint:
             return checkpoint(joint_codebook_loss, *args)
