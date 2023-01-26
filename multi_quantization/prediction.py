@@ -40,7 +40,10 @@ def joint_codebook_loss(predictor: Tensor,
     codebook_size = codebook_embedding_weight.shape[0] // (num_codebooks - 1)
 
     codebook_indexes = codebook_indexes.to(torch.int64)
-    assert list(predictor.shape[:-1]) == list(codebook_indexes.shape[:-1])
+    assert list(predictor.shape[:-1]) == list(codebook_indexes.shape[:-1]), (
+      f"Mismatching shapes: predictor.shape={predictor.shape} != "
+      f"codebook_indexes.shape={codebook_indexes.shape}"
+    )
     predictor = predictor.reshape(-1, predictor.shape[-1])  # (N, predictor_channels)
     codebook_indexes = codebook_indexes.reshape(-1, codebook_indexes.shape[-1])
 
