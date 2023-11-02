@@ -257,7 +257,7 @@ class Quantizer(nn.Module):
 
         Returns:  if as_bytes == False, a torch.LongTensor of shape (*, num_codebooks);
                   if as_bytes == True, a returns a Tensor of dtype=torch.uint8, of shape
-                  (*, num_codebooks/n), where n==4 if codebook_size <= 14; or
+                  (*, num_codebooks/n), where n==4 if codebook_size <= 4; or
                      2 if codebook_size <= 16, else 1.
         """
         x_reshaped = x.reshape(-1, self.dim)
